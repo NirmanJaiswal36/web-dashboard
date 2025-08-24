@@ -8,9 +8,16 @@ import {
   CardContent,
   useTheme,
   useMediaQuery,
-  Typography
+  Typography,
+  Button,
+  Chip,
+  Fab,
+  Tooltip
 } from '@mui/material';
+import { NotificationsActive } from '@mui/icons-material';
 import dynamic from 'next/dynamic';
+import EmergencyAlerts from '@/components/emergency/EmergencyAlerts';
+import { useEmergencyAPI } from '@/hooks/useEmergencyAPI';
 
 // Dynamic imports for Leaflet components to avoid SSR issues
 const MapContainer = dynamic(
@@ -27,6 +34,12 @@ const Marker = dynamic(
 );
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
+  { ssr: false }
+);
+
+// Dynamic import for custom emergency marker
+const EmergencyMarker = dynamic(
+  () => import('@/components/map/EmergencyMarker'),
   { ssr: false }
 );
 
@@ -73,6 +86,10 @@ export default function HomeDashboard() {
   const mapRef = useRef<any>(null);
   const [filters, setFilters] = useState<MapFilters>(defaultFilters);
   const [mapBounds, setMapBounds] = useState<any>(null);
+  const [alertsDismissed, setAlertsDismissed] = useState(false);
+  
+  // Emergency API hook
+  const { emergencies, isLoading: emergenciesLoading, error: emergenciesError, refetch: refetchEmergencies } = useEmergencyAPI();
   
   // Mock data for now
   const data = {
@@ -111,6 +128,59 @@ export default function HomeDashboard() {
     }
   };
 
+  // Handle emergency click - center map to emergency location
+  const handleEmergencyClick = (emergency: any) => {
+    centerMapTo(emergency.lat, emergency.lng, 16);
+  };
+
+  // Center map to show all emergencies
+  const centerMapToAllEmergencies = () => {
+    if (emergencies.length === 0) return;
+    
+    if (emergencies.length === 1) {
+      centerMapTo(emergencies[0].lat, emergencies[0].lng, 15);
+      return;
+    }
+
+    // Calculate bounds to fit all emergencies
+    const lats = emergencies.map(e => e.lat);
+    const lngs = emergencies.map(e => e.lng);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    
+    // Center on the middle of all emergencies
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    
+    // Calculate appropriate zoom level
+    const latDiff = maxLat - minLat;
+    const lngDiff = maxLng - minLng;
+    const maxDiff = Math.max(latDiff, lngDiff);
+    
+    let zoom = 10;
+    if (maxDiff < 0.01) zoom = 15;
+    else if (maxDiff < 0.1) zoom = 12;
+    else if (maxDiff < 1) zoom = 10;
+    else zoom = 8;
+    
+    centerMapTo(centerLat, centerLng, zoom);
+  };
+
+  // Handle dismissing emergency alerts
+  const handleDismissAlerts = () => {
+    setAlertsDismissed(true);
+  };
+
+  // Reset alerts when new emergencies arrive (optional)
+  useEffect(() => {
+    if (emergencies.length > 0 && alertsDismissed) {
+      // You can choose to automatically show alerts again when new emergencies arrive
+      // setAlertsDismissed(false);
+    }
+  }, [emergencies.length, alertsDismissed]);
+
   return (
     <Grid container sx={{ height: '100%', overflow: 'hidden' }}>
       {/* Left Panel - Map */}
@@ -128,8 +198,8 @@ export default function HomeDashboard() {
           boxShadow: theme.shadows[4]
         }}>
           <MapContainer
-            center={[20.5937, 78.9629]} // India center
-            zoom={5}
+            center={[20.5937, 78.9629]} // India center - will show our emergency markers
+            zoom={8} // Zoom in to better see the emergency markers
             style={{ height: '100%', width: '100%' }}
             whenReady={handleMapReady}
             zoomControl={!isMobile}
@@ -152,6 +222,15 @@ export default function HomeDashboard() {
                 </Popup>
               </Marker>
             ))}
+
+            {/* Custom Emergency markers with red flag icons and enhanced popups */}
+            {emergencies.map((emergency) => (
+              <EmergencyMarker
+                key={`emergency-${emergency.id}`}
+                emergency={emergency}
+                onClick={handleEmergencyClick}
+              />
+            ))}
           </MapContainer>
         </Card>
       </Grid>
@@ -167,6 +246,37 @@ export default function HomeDashboard() {
           p: 1
         }}
       >
+        {/* Emergency Alerts - Show prominently at top */}
+        {emergencies.length > 0 && !alertsDismissed && (
+          <Box sx={{ mb: 1 }}>
+            <EmergencyAlerts 
+              emergencies={emergencies} 
+              onEmergencyClick={handleEmergencyClick}
+              onDismiss={handleDismissAlerts}
+            />
+          </Box>
+        )}
+
+        {/* Quick Emergency Map Actions */}
+        {emergencies.length > 0 && (
+          <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={centerMapToAllEmergencies}
+              sx={{ fontSize: '0.75rem' }}
+            >
+              📍 View All Emergencies
+            </Button>
+            <Chip
+              label={`${emergencies.length} Active`}
+              color="error"
+              size="small"
+            />
+          </Box>
+        )}
+
         {/* Filters Panel */}
         <Card sx={{ mb: 1, borderRadius: 2 }}>
           <CardContent sx={{ p: 2 }}>
@@ -315,6 +425,33 @@ export default function HomeDashboard() {
           </CardContent>
         </Card>
       </Grid>
+
+      {/* Floating Emergency Alerts Button - Show when alerts are dismissed but emergencies exist */}
+      {emergencies.length > 0 && alertsDismissed && (
+        <Tooltip title="Show Emergency Alerts">
+          <Fab
+            color="error"
+            size="small"
+            onClick={() => setAlertsDismissed(false)}
+            sx={{
+              position: 'fixed',
+              bottom: 16,
+              right: 16,
+              zIndex: 1000,
+              animation: emergencies.filter(e => e.severity === 'critical').length > 0 
+                ? 'pulse 2s ease-in-out infinite' 
+                : 'none',
+              '@keyframes pulse': {
+                '0%': { transform: 'scale(1)' },
+                '50%': { transform: 'scale(1.1)' },
+                '100%': { transform: 'scale(1)' }
+              }
+            }}
+          >
+            <NotificationsActive />
+          </Fab>
+        </Tooltip>
+      )}
     </Grid>
   );
 }

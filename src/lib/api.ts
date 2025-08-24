@@ -1,5 +1,6 @@
 // src/lib/api.ts
 import axios from 'axios';
+import { Emergency } from '@/types/emergency';
 
 const baseURL = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
 
@@ -163,6 +164,21 @@ export const getDriveDashboard = async (id: string): Promise<DriveDashboardRespo
 
 export const getEmergencies = async () => {
   const response = await api.get('/api/emergencies/');
+  return response.data;
+};
+
+export const getEmergencyById = async (id: number) => {
+  const response = await api.get(`/api/emergencies/${id}/`);
+  return response.data;
+};
+
+export const createEmergency = async (emergencyData: Omit<Emergency, 'id' | 'created_at'>) => {
+  const response = await api.post('/api/emergencies/', emergencyData);
+  return response.data;
+};
+
+export const updateEmergencyStatus = async (id: number, status: string) => {
+  const response = await api.patch(`/api/emergencies/${id}/`, { status });
   return response.data;
 };
 
